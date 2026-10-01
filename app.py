@@ -87,6 +87,54 @@ div[data-testid="stHorizontalBlock"] .stButton>button[kind="secondary"]{backgrou
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown(r"""
+<style>
+/* FINAL TAB FIX — override Streamlit theme */
+div[data-testid="stTabs"] button[data-baseweb="tab"]{
+    min-height:56px !important;
+    padding:0 34px !important;
+    margin-right:10px !important;
+    background:#eee9dd !important;
+    border:1px solid #e1dacd !important;
+    border-radius:14px !important;
+    opacity:1 !important;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"] p,
+div[data-testid="stTabs"] button[data-baseweb="tab"] span,
+div[data-testid="stTabs"] button[data-baseweb="tab"] div{
+    color:#454c43 !important;
+    -webkit-text-fill-color:#454c43 !important;
+    opacity:1 !important;
+    font-size:17px !important;
+    font-weight:800 !important;
+    white-space:nowrap !important;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"]{
+    background:#64735e !important;
+    border-color:#64735e !important;
+}
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] p,
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] span,
+div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] div{
+    color:#ffffff !important;
+    -webkit-text-fill-color:#ffffff !important;
+}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+div[data-testid="stTabs"] [data-baseweb="tab-border"],
+div[data-testid="stTabs"] div[role="tablist"] > div:last-child{
+    display:none !important;
+}
+div[data-testid="stRadio"] label p,
+div[data-testid="stRadio"] label span{
+    color:#343a33 !important;
+    -webkit-text-fill-color:#343a33 !important;
+    opacity:1 !important;
+    font-size:17px !important;
+    font-weight:750 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown("""
 <div class="hero">
  <div class="eyebrow">OUR BIBLE TYPING JOURNAL</div>
@@ -106,13 +154,13 @@ m_done,m_draft=writer_stats("미자")
 
 c1,c2,c3=st.columns(3)
 with c1:
-    st.metric("🌿 Gahyang", f"{g_done}장", f"작성 중 {g_draft}장")
+    st.metric("🌿 Gahyang", f"{g_done}장")
     st.progress(min(g_done/TOTAL,1.0))
-    st.caption(f"완료 진행률 {g_done/TOTAL*100:.1f}% · {g_done:,}/{TOTAL:,}장")
+    st.caption(f"완료 진행률 {g_done/TOTAL*100:.1f}% · {g_done:,}/{TOTAL:,}장" + (f" · 작성 중 {g_draft}장" if g_draft else ""))
 with c2:
-    st.metric("🌸 Mija", f"{m_done}장", f"작성 중 {m_draft}장")
+    st.metric("🌸 Mija", f"{m_done}장")
     st.progress(min(m_done/TOTAL,1.0))
-    st.caption(f"완료 진행률 {m_done/TOTAL*100:.1f}% · {m_done:,}/{TOTAL:,}장")
+    st.caption(f"완료 진행률 {m_done/TOTAL*100:.1f}% · {m_done:,}/{TOTAL:,}장" + (f" · 작성 중 {m_draft}장" if m_draft else ""))
 with c3:
     st.metric("📖 전체 성경", f"{TOTAL:,}장")
     st.caption("구약 929장 · 신약 260장")
@@ -121,9 +169,9 @@ tab_write,tab_progress,tab_history=st.tabs(["✍️ 말씀 기록","📊 나의 
 
 with tab_write:
     st.markdown('<div class="section-title">1. 기록할 내용을 선택하세요</div>',unsafe_allow_html=True)
-    a,b,c,d=st.columns([1.1,1,1,1])
-    display_writer=a.selectbox("작성자",["Gahyang","Mija"])
+    display_writer=st.radio("작성자",["Gahyang","Mija"],horizontal=True,key="writer_choice")
     db_writer=DISPLAY_TO_DB[display_writer]
+    b,c,d=st.columns([1,1.4,.7])
     record_date=b.date_input("날짜",date.today())
     book=c.selectbox("성경",ALL_BOOKS)
     chapter=d.selectbox("장",range(1,BOOK_MAP[book]+1))
