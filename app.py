@@ -165,9 +165,15 @@ with c3:
     st.metric("📖 전체 성경", f"{TOTAL:,}장")
     st.caption("구약 929장 · 신약 260장")
 
-tab_write,tab_progress,tab_history=st.tabs(["✍️ 말씀 기록","📊 나의 진행","🗂️ 지난 기록"])
+menu = st.radio(
+    "메뉴",
+    ["✍️ 말씀 기록", "📊 나의 진행", "🗂️ 지난 기록"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="main_menu"
+)
 
-with tab_write:
+if menu == "✍️ 말씀 기록":
     st.markdown('<div class="section-title">1. 기록할 내용을 선택하세요</div>',unsafe_allow_html=True)
     display_writer=st.radio("작성자",["Gahyang","Mija"],horizontal=True,key="writer_choice")
     db_writer=DISPLAY_TO_DB[display_writer]
@@ -212,7 +218,7 @@ with tab_write:
             st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
             refresh()
 
-with tab_progress:
+elif menu == "📊 나의 진행":
     st.markdown('<div class="section-title">나의 진행 현황</div>',unsafe_allow_html=True)
     person=st.radio("작성자 선택",["Gahyang","Mija"],horizontal=True,key="progress_writer")
     dbp=DISPLAY_TO_DB[person]
@@ -240,7 +246,7 @@ with tab_progress:
                 left.write(f"**{bn}** · {n}/{total}장")
                 right.progress(min(n/total,1.0))
 
-with tab_history:
+elif menu == "🗂️ 지난 기록":
     st.markdown('<div class="section-title">지난 기록</div>',unsafe_allow_html=True)
     f1,f2,f3=st.columns(3)
     who=f1.selectbox("작성자",["전체","Gahyang","Mija"],key="hist_writer")
