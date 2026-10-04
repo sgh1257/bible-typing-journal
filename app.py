@@ -1,6 +1,7 @@
 import streamlit as st
 from datetime import date
 import re
+from streamlit_quill import st_quill
 from supabase import create_client
 
 st.set_page_config(page_title="말씀을 쓰다", page_icon="📖", layout="wide")
@@ -71,18 +72,36 @@ def set_menu(menu_name):
 def set_writer(writer_name):
     st.session_state["active_writer"] = writer_name
 
-def normalize_verse_numbers(body):
-    """저장 시 빈 줄을 제외한 각 줄 앞에 1, 2, 3... 절 번호 정리.
-    이미 숫자/숫자절로 시작하는 줄은 기존 번호를 제거하고 다시 순서대로 부여.
-    """
+def plain_to_quill_html(body):
+    """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
     if not body or not body.strip():
-        return body
-    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
-    cleaned = []
+        return "<ol><li><br></li></ol>"
+    lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
+    items=[]
     for ln in lines:
-        ln = re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
-        cleaned.append(ln)
-    return "\n".join(f"{i+1}  {ln}" for i, ln in enumerate(cleaned))
+        ln=re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
+        safe=ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        items.append(f"<li>{safe}</li>")
+    return "<ol>"+"".join(items)+"</ol>"
+
+def quill_to_plain(html):
+    """편집기 내용을 DB 저장용 일반 텍스트로 변환."""
+    if not html:
+        return ""
+    items=re.findall(r"<li[^>]*>(.*?)</li>", html, flags=re.S|re.I)
+    if items:
+        out=[]
+        for i,item in enumerate(items,1):
+            item=re.sub(r"<br\s*/?>", "\n", item, flags=re.I)
+            item=re.sub(r"<[^>]+>", "", item)
+            item=(item.replace("&nbsp;"," ").replace("&amp;","&")
+                      .replace("&lt;","<").replace("&gt;",">")).strip()
+            if item:
+                out.append(f"{i}  {item}")
+        return "\n".join(out)
+    text=re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
+    text=re.sub(r"<[^>]+>", "", text)
+    return text.strip()
 
 # ---------- Design ----------
 st.markdown("""
@@ -271,14 +290,15 @@ if menu == "✍️ 말씀 기록":
 
     st.markdown('<div class="section-title">2. 성경 본문을 타이핑하세요</div>',unsafe_allow_html=True)
     initial_body=editing.get("body","") if editing else ""
-    body=st.text_area(
-        "말씀 타이핑",
-        value=initial_body,
-        height=430,
-        placeholder="말씀을 한 글자씩 천천히 타이핑해 보세요.\n각 절마다 Enter로 줄을 바꾸면 저장할 때 1, 2, 3… 절 번호가 정리됩니다.",
-        key=f"body_{editing.get('id') if editing else 'new'}"
+    editor_html=st_quill(
+        value=plain_to_quill_html(initial_body),
+        html=True,
+        toolbar=[],
+        placeholder="1절 말씀을 입력하세요.",
+        key=f"verse_editor_{editing.get('id') if editing else 'new'}"
     )
-    st.caption("※ 현재 Streamlit 기본 입력창에서는 Enter를 누르는 순간 번호를 즉시 삽입할 수 없어, 저장할 때 각 줄 앞의 절 번호를 1, 2, 3… 순서로 자동 정리합니다.")
+    body=quill_to_plain(editor_html)
+    st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 문장이 길어 자동 줄바꿈되는 경우에는 절 번호가 증가하지 않습니다.")
 
     st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
     reflection=""
@@ -299,10 +319,9 @@ if menu == "✍️ 말씀 기록":
     save_col,done_col=st.columns(2)
 
     if save_col.button("💾 임시 저장",use_container_width=True):
-        numbered_body=normalize_verse_numbers(body)
         payload={
             "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
-            "chapter":chapter,"body":numbered_body,"favorite":"",
+            "chapter":chapter,"body":body,"favorite":"",
             "note":reflection,"completed":False
         }
         try:
@@ -318,10 +337,9 @@ if menu == "✍️ 말씀 기록":
         if not body.strip():
             st.warning("완료하기 전에 말씀 본문을 입력해 주세요.")
         else:
-            numbered_body=normalize_verse_numbers(body)
-            payload={
+                payload={
                 "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
-                "chapter":chapter,"body":numbered_body,"favorite":"",
+                "chapter":chapter,"body":body,"favorite":"",
                 "note":reflection,"completed":True
             }
             try:
