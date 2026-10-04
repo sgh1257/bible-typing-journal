@@ -174,11 +174,26 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+def chapter_key(row):
+    """같은 작성자·성경·장을 하나의 장으로 계산하기 위한 키."""
+    try:
+        chapter = int(row.get("chapter"))
+    except (TypeError, ValueError):
+        chapter = row.get("chapter")
+    return (row.get("book"), chapter)
+
+def unique_chapters(records):
+    """동일 성경/장이 여러 번 저장되어도 진행률에서는 한 장으로 계산."""
+    return {chapter_key(r) for r in records if r.get("book") and r.get("chapter") is not None}
+
 def writer_stats(db_name):
     mine=[r for r in rows if r.get("writer")==db_name]
     done=[r for r in mine if is_complete(r)]
     drafts=[r for r in mine if not is_complete(r)]
-    return len(done), len(drafts)
+    done_keys=unique_chapters(done)
+    # 이미 완료된 장의 임시 저장본은 '작성 중'에서 제외
+    draft_keys=unique_chapters(drafts) - done_keys
+    return len(done_keys), len(draft_keys)
 
 g_done,g_draft=writer_stats("가향")
 m_done,m_draft=writer_stats("미자")
@@ -421,23 +436,34 @@ elif menu == "📊 나의 진행":
     mine=[r for r in rows if r.get("writer")==dbp]
     done=[r for r in mine if is_complete(r)]
     drafts=[r for r in mine if not is_complete(r)]
-    x,y,z=st.columns(3)
-    x.metric("완료",f"{len(done)}장")
-    y.metric("작성 중",f"{len(drafts)}장")
-    z.metric("진행률",f"{len(done)/TOTAL*100:.1f}%")
-    st.progress(min(len(done)/TOTAL,1.0))
+    done_keys=unique_chapters(done)
+    draft_keys=unique_chapters(drafts) - done_keys
+    done_count=len(done_keys)
+    draft_count=len(draft_keys)
 
-    if drafts:
+    x,y,z=st.columns(3)
+    x.metric("완료",f"{done_count}장")
+    y.metric("작성 중",f"{draft_count}장")
+    z.metric("진행률",f"{done_count/TOTAL*100:.1f}%")
+    st.progress(min(done_count/TOTAL,1.0))
+
+    if draft_keys:
         st.markdown('<div class="section-title">✏️ 작성 중인 장</div>',unsafe_allow_html=True)
+        shown=set()
         for r in drafts:
-            st.write(f"• {r['book']} {r['chapter']}장 · 마지막 저장 {r['record_date']}")
+            key=chapter_key(r)
+            if key in draft_keys and key not in shown:
+                st.write(f"• {r['book']} {r['chapter']}장 · 마지막 저장 {r['record_date']}")
+                shown.add(key)
+
     st.markdown('<div class="section-title">성경별 완료 현황</div>',unsafe_allow_html=True)
     for section,books in BOOKS.items():
-        sec_done=sum(1 for r in done if r.get("book") in [b for b,_ in books])
+        section_names={b for b,_ in books}
+        sec_done=sum(1 for book,chapter in done_keys if book in section_names)
         sec_total=sum(n for _,n in books)
         with st.expander(f"{'🌳' if section=='구약' else '🌱'} {section} · {sec_done}/{sec_total}장",expanded=(section=="구약")):
             for bn,total in books:
-                n=sum(1 for r in done if r.get("book")==bn)
+                n=sum(1 for book,chapter in done_keys if book==bn)
                 left,right=st.columns([2,5])
                 left.write(f"**{bn}** · {n}/{total}장")
                 right.progress(min(n/total,1.0))
