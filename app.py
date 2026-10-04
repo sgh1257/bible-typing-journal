@@ -337,7 +337,7 @@ if menu == "✍️ 말씀 기록":
         if not body.strip():
             st.warning("완료하기 전에 말씀 본문을 입력해 주세요.")
         else:
-                payload={
+            payload={
                 "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
                 "chapter":chapter,"body":body,"favorite":"",
                 "note":reflection,"completed":True
