@@ -2,6 +2,7 @@ import streamlit as st
 from datetime import date
 import re
 from streamlit_quill import st_quill
+import streamlit.components.v1 as components
 from supabase import create_client
 
 st.set_page_config(page_title="말씀을 쓰다", page_icon="📖", layout="wide")
@@ -136,6 +137,15 @@ h1,h2,h3{color:#405044!important}
 .writer-unselected .name{font-size:1.13rem;font-weight:850;color:#4c514b}
 .writer-unselected .sub{font-size:.86rem;color:#8a887f;margin-top:2px}
 [data-testid="stWidgetLabel"] p{color:#40463e!important;opacity:1!important;font-size:1rem!important;font-weight:750!important}
+
+/* 말씀 필사 편집기 */
+div[data-testid="stCustomComponentV1"] iframe{min-height:470px!important}
+.verse-heading{
+    background:#f4f0e6;border:1px solid #ded7ca;border-bottom:0;
+    border-radius:16px 16px 0 0;padding:14px 18px 12px;margin-top:.55rem
+}
+.verse-heading .book{font-size:1.15rem;font-weight:900;color:#405044}
+.verse-heading .guide{font-size:.9rem;color:#77766e;margin-top:3px}
 
 /* Inputs */
 .stDateInput [data-baseweb="input"],.stTextInput [data-baseweb="input"],.stTextArea textarea,.stSelectbox [data-baseweb="select"]>div{
@@ -289,6 +299,11 @@ if menu == "✍️ 말씀 기록":
         )
 
     st.markdown('<div class="section-title">2. 성경 본문을 타이핑하세요</div>',unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="verse-heading"><div class="book">📖 {book} {chapter}장</div>'
+        '<div class="guide">말씀을 한 절씩 천천히 기록해 보세요.</div></div>',
+        unsafe_allow_html=True
+    )
     initial_body=editing.get("body","") if editing else ""
     editor_html=st_quill(
         value=plain_to_quill_html(initial_body),
@@ -298,7 +313,48 @@ if menu == "✍️ 말씀 기록":
         key=f"verse_editor_{editing.get('id') if editing else 'new'}"
     )
     body=quill_to_plain(editor_html)
-    st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 문장이 길어 자동 줄바꿈되는 경우에는 절 번호가 증가하지 않습니다.")
+
+    # 브라우저 맞춤법 검사 해제 + 편집기 글씨/절 간격 조정
+    components.html("""
+    <script>
+    function tuneEditor(){
+      try{
+        const frames = window.parent.document.querySelectorAll('iframe');
+        frames.forEach((frame)=>{
+          try{
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            if(!doc) return;
+            const editor = doc.querySelector('.ql-editor');
+            if(editor){
+              editor.setAttribute('spellcheck','false');
+              editor.setAttribute('autocorrect','off');
+              editor.setAttribute('autocapitalize','off');
+              editor.style.fontSize='18px';
+              editor.style.lineHeight='1.75';
+              editor.style.minHeight='390px';
+              const lis=editor.querySelectorAll('li');
+              lis.forEach(li=>{
+                li.style.marginBottom='13px';
+                li.style.paddingLeft='6px';
+              });
+            }
+            const toolbar=doc.querySelector('.ql-toolbar');
+            if(toolbar) toolbar.style.display='none';
+            const container=doc.querySelector('.ql-container');
+            if(container){
+              container.style.borderTop='1px solid #ded7ca';
+              container.style.fontFamily='inherit';
+            }
+          }catch(e){}
+        });
+      }catch(e){}
+    }
+    setTimeout(tuneEditor,250);
+    setTimeout(tuneEditor,800);
+    setTimeout(tuneEditor,1600);
+    </script>
+    """, height=0)
+    st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
 
     st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
     reflection=""
