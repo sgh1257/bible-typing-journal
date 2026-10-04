@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import date
+import re
 from supabase import create_client
 
 st.set_page_config(page_title="말씀을 쓰다", page_icon="📖", layout="wide")
@@ -34,6 +35,48 @@ def refresh():
 
 rows = get_rows()
 
+
+# ---------- helpers ----------
+def parse_date(value):
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except Exception:
+        return date.today()
+
+def find_record_by_id(record_id):
+    if record_id is None:
+        return None
+    return next((r for r in rows if str(r.get("id")) == str(record_id)), None)
+
+def save_record(existing, payload):
+    """기존 기록은 id로 update, 새 기록은 insert.
+    실패 시 예외를 그대로 올려 화면에서 원인을 확인할 수 있게 함.
+    """
+    if existing and existing.get("id") is not None:
+        return sb.table("bible_records").update(payload).eq("id", existing["id"]).execute()
+    return sb.table("bible_records").insert(payload).execute()
+
+def open_record(record_id):
+    st.session_state["edit_record_id"] = record_id
+    st.session_state["main_menu"] = "✍️ 말씀 기록"
+
+def new_record():
+    st.session_state.pop("edit_record_id", None)
+    st.session_state["main_menu"] = "✍️ 말씀 기록"
+
+def normalize_verse_numbers(body):
+    """저장 시 빈 줄을 제외한 각 줄 앞에 1, 2, 3... 절 번호 정리.
+    이미 숫자/숫자절로 시작하는 줄은 기존 번호를 제거하고 다시 순서대로 부여.
+    """
+    if not body or not body.strip():
+        return body
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
+    cleaned = []
+    for ln in lines:
+        ln = re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
+        cleaned.append(ln)
+    return "\n".join(f"{i+1}  {ln}" for i, ln in enumerate(cleaned))
+
 # ---------- Design ----------
 st.markdown("""
 <style>
@@ -51,17 +94,30 @@ h1,h2,h3{color:#405044!important}
 [data-testid="stMetricValue"]{color:#405044!important}
 [data-testid="stProgress"]>div>div>div>div{background:var(--sage2)!important}
 
-/* Tabs: generous padding, no red indicator */
-.stTabs [data-baseweb="tab-list"]{gap:12px!important;border-bottom:0!important}
-.stTabs [data-baseweb="tab"]{height:54px!important;padding:0 30px!important;background:var(--soft)!important;border-radius:14px!important;border:0!important;color:#4b5149!important}
-.stTabs [data-baseweb="tab"] p,.stTabs [data-baseweb="tab"] span{color:#4b5149!important;font-size:1.03rem!important;font-weight:750!important;white-space:nowrap!important}
-.stTabs [aria-selected="true"]{background:var(--sage)!important}
-.stTabs [aria-selected="true"] p,.stTabs [aria-selected="true"] span{color:white!important}
-.stTabs [data-baseweb="tab-highlight"],.stTabs [data-baseweb="tab-border"]{display:none!important}
+/* 상단 메뉴 */
+div[data-testid="stRadio"]:has(input[name="main_menu"]) [role="radiogroup"]{gap:12px!important}
+div[data-testid="stRadio"]:has(input[name="main_menu"]) label{
+    background:#eee9dd!important;border:1px solid #e1dacd!important;border-radius:14px!important;
+    padding:12px 24px!important;min-width:170px!important;justify-content:center!important
+}
 
-/* Labels / radio */
-[data-testid="stWidgetLabel"] p,[data-testid="stRadio"] label p,[data-testid="stRadio"] label span{color:#40463e!important;opacity:1!important;font-size:1rem!important;font-weight:700!important}
-[data-testid="stRadio"] [role="radiogroup"]{gap:1.6rem!important}
+/* 작성자 선택: 큰 카드형 */
+div[data-testid="stRadio"]:has(input[name="writer_choice"]) [role="radiogroup"]{gap:14px!important}
+div[data-testid="stRadio"]:has(input[name="writer_choice"]) label{
+    min-width:220px!important;min-height:70px!important;padding:14px 20px!important;
+    border:2px solid #d7d2c6!important;border-radius:16px!important;background:#fffdf9!important;
+    box-shadow:0 3px 10px rgba(70,60,45,.04)!important
+}
+div[data-testid="stRadio"]:has(input[name="writer_choice"]) label:has(input:checked){
+    border-color:#64735e!important;background:#edf2e9!important;box-shadow:0 4px 14px rgba(75,95,70,.10)!important
+}
+div[data-testid="stRadio"]:has(input[name="writer_choice"]) label p{
+    font-size:1.12rem!important;font-weight:850!important;color:#344136!important
+}
+div[data-testid="stRadio"] label p,div[data-testid="stRadio"] label span{
+    color:#343a33!important;-webkit-text-fill-color:#343a33!important;opacity:1!important;font-weight:750!important
+}
+[data-testid="stWidgetLabel"] p{color:#40463e!important;opacity:1!important;font-size:1rem!important;font-weight:750!important}
 
 /* Inputs */
 .stDateInput [data-baseweb="input"],.stTextInput [data-baseweb="input"],.stTextArea textarea,.stSelectbox [data-baseweb="select"]>div{
@@ -76,62 +132,9 @@ background:var(--paper)!important;color:#292d28!important;-webkit-text-fill-colo
 /* Buttons */
 .stButton>button{min-height:48px;border-radius:13px!important;background:var(--sage)!important;color:white!important;border:0!important;font-weight:800!important;font-size:1rem!important}
 .stButton>button p,.stButton>button span{color:white!important}
-div[data-testid="stHorizontalBlock"] .stButton>button[kind="secondary"]{background:#87957f!important}
-
-/* Cards / helpers */
 .note{padding:1rem 1.1rem;background:#edf2e9;border:1px solid #d8e0d3;border-radius:14px;color:#4b5847;margin:.4rem 0 1rem}
 .section-title{font-size:1.25rem;font-weight:850;color:#405044;margin:1rem 0 .25rem}
 .small-muted{color:#7a786f;font-size:.94rem}
-.status-draft{display:inline-block;padding:.18rem .55rem;border-radius:999px;background:#fff0d9;color:#a66a1c;font-weight:800;font-size:.82rem}
-.status-done{display:inline-block;padding:.18rem .55rem;border-radius:999px;background:#e6f1e2;color:#52704d;font-weight:800;font-size:.82rem}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown(r"""
-<style>
-/* FINAL TAB FIX — override Streamlit theme */
-div[data-testid="stTabs"] button[data-baseweb="tab"]{
-    min-height:56px !important;
-    padding:0 34px !important;
-    margin-right:10px !important;
-    background:#eee9dd !important;
-    border:1px solid #e1dacd !important;
-    border-radius:14px !important;
-    opacity:1 !important;
-}
-div[data-testid="stTabs"] button[data-baseweb="tab"] p,
-div[data-testid="stTabs"] button[data-baseweb="tab"] span,
-div[data-testid="stTabs"] button[data-baseweb="tab"] div{
-    color:#454c43 !important;
-    -webkit-text-fill-color:#454c43 !important;
-    opacity:1 !important;
-    font-size:17px !important;
-    font-weight:800 !important;
-    white-space:nowrap !important;
-}
-div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"]{
-    background:#64735e !important;
-    border-color:#64735e !important;
-}
-div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] p,
-div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] span,
-div[data-testid="stTabs"] button[data-baseweb="tab"][aria-selected="true"] div{
-    color:#ffffff !important;
-    -webkit-text-fill-color:#ffffff !important;
-}
-div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
-div[data-testid="stTabs"] [data-baseweb="tab-border"],
-div[data-testid="stTabs"] div[role="tablist"] > div:last-child{
-    display:none !important;
-}
-div[data-testid="stRadio"] label p,
-div[data-testid="stRadio"] label span{
-    color:#343a33 !important;
-    -webkit-text-fill-color:#343a33 !important;
-    opacity:1 !important;
-    font-size:17px !important;
-    font-weight:750 !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -165,6 +168,9 @@ with c3:
     st.metric("📖 전체 성경", f"{TOTAL:,}장")
     st.caption("구약 929장 · 신약 260장")
 
+if "main_menu" not in st.session_state:
+    st.session_state["main_menu"] = "✍️ 말씀 기록"
+
 menu = st.radio(
     "메뉴",
     ["✍️ 말씀 기록", "📊 나의 진행", "🗂️ 지난 기록"],
@@ -174,49 +180,128 @@ menu = st.radio(
 )
 
 if menu == "✍️ 말씀 기록":
-    st.markdown('<div class="section-title">1. 기록할 내용을 선택하세요</div>',unsafe_allow_html=True)
-    display_writer=st.radio("작성자",["Gahyang","Mija"],horizontal=True,key="writer_choice")
-    db_writer=DISPLAY_TO_DB[display_writer]
-    b,c,d=st.columns([1,1.4,.7])
-    record_date=b.date_input("날짜",date.today())
-    book=c.selectbox("성경",ALL_BOOKS)
-    chapter=d.selectbox("장",range(1,BOOK_MAP[book]+1))
+    # 과거 기록은 '지난 기록 > 기록 열기'로 들어왔을 때만 불러옴
+    editing = find_record_by_id(st.session_state.get("edit_record_id"))
 
-    old=next((r for r in rows if r.get("writer")==db_writer and r.get("book")==book and int(r.get("chapter",0))==chapter),None)
-    if old:
-        status="완료" if is_complete(old) else "작성 중"
-        st.markdown(f'<div class="note">💡 {display_writer}님의 <b>{book} {chapter}장</b> 기존 기록을 불러왔습니다. 현재 상태: <b>{status}</b><br>저장된 내용 아래에서 그대로 이어서 작성하세요.</div>',unsafe_allow_html=True)
+    top_l, top_r = st.columns([5,1])
+    with top_l:
+        st.markdown('<div class="section-title">1. 기록할 내용을 선택하세요</div>',unsafe_allow_html=True)
+    with top_r:
+        if editing:
+            st.button("＋ 새 기록", use_container_width=True, on_click=new_record)
+
+    default_display = DB_TO_DISPLAY.get(editing.get("writer"), "Gahyang") if editing else "Gahyang"
+    display_writer=st.radio(
+        "작성자",
+        ["Gahyang","Mija"],
+        index=["Gahyang","Mija"].index(default_display),
+        horizontal=True,
+        key=f"writer_choice_{editing.get('id') if editing else 'new'}"
+    )
+    db_writer=DISPLAY_TO_DB[display_writer]
+
+    default_book = editing.get("book") if editing and editing.get("book") in ALL_BOOKS else ALL_BOOKS[0]
+    default_chapter = int(editing.get("chapter",1)) if editing else 1
+
+    b,c,d=st.columns([1,1.4,.7])
+    record_date=b.date_input(
+        "날짜",
+        parse_date(editing.get("record_date")) if editing else date.today(),
+        key=f"record_date_{editing.get('id') if editing else 'new'}"
+    )
+    book=c.selectbox(
+        "성경",
+        ALL_BOOKS,
+        index=ALL_BOOKS.index(default_book),
+        key=f"book_{editing.get('id') if editing else 'new'}"
+    )
+    chapter_options=list(range(1,BOOK_MAP[book]+1))
+    chapter=d.selectbox(
+        "장",
+        chapter_options,
+        index=chapter_options.index(default_chapter) if default_chapter in chapter_options else 0,
+        key=f"chapter_{editing.get('id') if editing else 'new'}"
+    )
+
+    if editing:
+        status="완료" if is_complete(editing) else "작성 중"
+        st.markdown(
+            f'<div class="note">📖 <b>{editing["record_date"]}</b>에 저장한 '
+            f'<b>{DB_TO_DISPLAY.get(editing.get("writer"), editing.get("writer",""))} · '
+            f'{editing.get("book")} {editing.get("chapter")}장</b> 기록을 열었습니다. '
+            f'현재 상태: <b>{status}</b><br>수정 후 아래 저장 버튼을 누르면 이 기록이 업데이트됩니다.</div>',
+            unsafe_allow_html=True
+        )
     else:
-        st.markdown('<div class="note">💡 한 장을 한 번에 모두 작성하지 않아도 됩니다. <b>임시 저장</b> 후 다음에 같은 작성자·성경·장을 선택하면 자동으로 이어서 작성할 수 있습니다.</div>',unsafe_allow_html=True)
+        st.markdown(
+            '<div class="note">🌿 오늘의 새 기록입니다. 과거 기록은 자동으로 불러오지 않습니다. '
+            '이전에 저장한 내용을 이어 쓰려면 <b>지난 기록 → 기록 열기</b>를 이용하세요.</div>',
+            unsafe_allow_html=True
+        )
 
     st.markdown('<div class="section-title">2. 성경 본문을 타이핑하세요</div>',unsafe_allow_html=True)
-    body=st.text_area("말씀 타이핑",value=old.get("body","") if old else "",height=430,placeholder="말씀을 한 글자씩 천천히 타이핑해 보세요...")
+    initial_body=editing.get("body","") if editing else ""
+    body=st.text_area(
+        "말씀 타이핑",
+        value=initial_body,
+        height=430,
+        placeholder="말씀을 한 글자씩 천천히 타이핑해 보세요.\n각 절마다 Enter로 줄을 바꾸면 저장할 때 1, 2, 3… 절 번호가 정리됩니다.",
+        key=f"body_{editing.get('id') if editing else 'new'}"
+    )
+    st.caption("※ 현재 Streamlit 기본 입력창에서는 Enter를 누르는 순간 번호를 즉시 삽입할 수 없어, 저장할 때 각 줄 앞의 절 번호를 1, 2, 3… 순서로 자동 정리합니다.")
 
     st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
-    # 기존 favorite/note가 있으면 잃지 않도록 합쳐 보여줌
     reflection=""
-    if old:
-        reflection=(old.get("note") or "").strip()
-        fav=(old.get("favorite") or "").strip()
+    if editing:
+        reflection=(editing.get("note") or "").strip()
+        fav=(editing.get("favorite") or "").strip()
         if not reflection and fav: reflection=fav
         elif fav and fav not in reflection: reflection=f"{fav}\n{reflection}".strip()
-    reflection=st.text_area("마음에 남은 구절이나 생각",value=reflection,height=125,placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.")
+    reflection=st.text_area(
+        "마음에 남은 구절이나 생각",
+        value=reflection,
+        height=125,
+        placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
+        key=f"reflection_{editing.get('id') if editing else 'new'}"
+    )
 
     st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
     save_col,done_col=st.columns(2)
+
     if save_col.button("💾 임시 저장",use_container_width=True):
-        payload={"writer":db_writer,"record_date":record_date.isoformat(),"book":book,"chapter":chapter,"body":body,"favorite":"","note":reflection,"completed":False}
-        sb.table("bible_records").upsert(payload,on_conflict="writer,book,chapter").execute()
-        st.success(f"{display_writer} · {book} {chapter}장 작성 내용을 저장했습니다. 다음에 이어서 작성할 수 있어요.")
-        refresh()
+        numbered_body=normalize_verse_numbers(body)
+        payload={
+            "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
+            "chapter":chapter,"body":numbered_body,"favorite":"",
+            "note":reflection,"completed":False
+        }
+        try:
+            save_record(editing,payload)
+            st.success(f"💾 {display_writer} · {book} {chapter}장 내용을 임시 저장했습니다.")
+            st.session_state.pop("edit_record_id", None)
+            refresh()
+        except Exception as e:
+            st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
+            st.code(str(e))
+
     if done_col.button("✓ 이 장 완료",use_container_width=True,type="primary"):
         if not body.strip():
             st.warning("완료하기 전에 말씀 본문을 입력해 주세요.")
         else:
-            payload={"writer":db_writer,"record_date":record_date.isoformat(),"book":book,"chapter":chapter,"body":body,"favorite":"","note":reflection,"completed":True}
-            sb.table("bible_records").upsert(payload,on_conflict="writer,book,chapter").execute()
-            st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
-            refresh()
+            numbered_body=normalize_verse_numbers(body)
+            payload={
+                "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
+                "chapter":chapter,"body":numbered_body,"favorite":"",
+                "note":reflection,"completed":True
+            }
+            try:
+                save_record(editing,payload)
+                st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
+                st.session_state.pop("edit_record_id", None)
+                refresh()
+            except Exception as e:
+                st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
+                st.code(str(e))
 
 elif menu == "📊 나의 진행":
     st.markdown('<div class="section-title">나의 진행 현황</div>',unsafe_allow_html=True)
@@ -248,6 +333,7 @@ elif menu == "📊 나의 진행":
 
 elif menu == "🗂️ 지난 기록":
     st.markdown('<div class="section-title">지난 기록</div>',unsafe_allow_html=True)
+    st.caption("이어 쓰거나 수정할 기록은 아래에서 ‘기록 열기’를 눌러 주세요.")
     f1,f2,f3=st.columns(3)
     who=f1.selectbox("작성자",["전체","Gahyang","Mija"],key="hist_writer")
     book_filter=f2.selectbox("성경",["전체"]+ALL_BOOKS,key="hist_book")
@@ -261,6 +347,7 @@ elif menu == "🗂️ 지난 기록":
 
     if not filtered:
         st.info("조건에 맞는 기록이 없습니다.")
+
     for r in filtered:
         disp=DB_TO_DISPLAY.get(r.get("writer"),r.get("writer",""))
         stat="완료" if is_complete(r) else "작성 중"
@@ -270,7 +357,20 @@ elif menu == "🗂️ 지난 기록":
                 st.markdown("**🌿 오늘의 말씀 기록**")
                 st.write(r["note"])
             if r.get("body"):
-                st.text_area("말씀 기록",r["body"],height=220,disabled=True,key=f"body_{r['id']}")
-            if st.button("🗑️ 이 기록 삭제",key=f"delete_{r['id']}"):
-                sb.table("bible_records").delete().eq("id",r["id"]).execute()
-                refresh()
+                st.text_area("말씀 기록",r["body"],height=220,disabled=True,key=f"hist_body_{r['id']}")
+            oc,dc=st.columns([2,1])
+            oc.button(
+                "✍️ 기록 열기",
+                key=f"open_{r['id']}",
+                use_container_width=True,
+                on_click=open_record,
+                args=(r["id"],)
+            )
+            if dc.button("🗑️ 삭제",key=f"delete_{r['id']}",use_container_width=True):
+                try:
+                    sb.table("bible_records").delete().eq("id",r["id"]).execute()
+                    st.success("기록을 삭제했습니다.")
+                    refresh()
+                except Exception as e:
+                    st.error("삭제에 실패했습니다.")
+                    st.code(str(e))
