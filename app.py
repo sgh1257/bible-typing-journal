@@ -63,6 +63,13 @@ def open_record(record_id):
 def new_record():
     st.session_state.pop("edit_record_id", None)
     st.session_state["main_menu"] = "✍️ 말씀 기록"
+    st.session_state["active_writer"] = "Gahyang"
+
+def set_menu(menu_name):
+    st.session_state["main_menu"] = menu_name
+
+def set_writer(writer_name):
+    st.session_state["active_writer"] = writer_name
 
 def normalize_verse_numbers(body):
     """저장 시 빈 줄을 제외한 각 줄 앞에 1, 2, 3... 절 번호 정리.
@@ -94,29 +101,21 @@ h1,h2,h3{color:#405044!important}
 [data-testid="stMetricValue"]{color:#405044!important}
 [data-testid="stProgress"]>div>div>div>div{background:var(--sage2)!important}
 
-/* 상단 메뉴 */
-div[data-testid="stRadio"]:has(input[name="main_menu"]) [role="radiogroup"]{gap:12px!important}
-div[data-testid="stRadio"]:has(input[name="main_menu"]) label{
-    background:#eee9dd!important;border:1px solid #e1dacd!important;border-radius:14px!important;
-    padding:12px 24px!important;min-width:170px!important;justify-content:center!important
+/* 상단 메뉴와 작성자 카드는 Streamlit 버튼 자체를 사용 */
+.nav-wrap{margin:.65rem 0 1.2rem}
+.writer-label{font-size:1rem;font-weight:800;color:#40463e;margin:.35rem 0 .45rem}
+.writer-selected{
+    padding:14px 18px;border:2px solid #64735e;border-radius:16px;background:#edf2e9;
+    min-height:72px;box-shadow:0 4px 14px rgba(75,95,70,.10)
 }
-
-/* 작성자 선택: 큰 카드형 */
-div[data-testid="stRadio"]:has(input[name="writer_choice"]) [role="radiogroup"]{gap:14px!important}
-div[data-testid="stRadio"]:has(input[name="writer_choice"]) label{
-    min-width:220px!important;min-height:70px!important;padding:14px 20px!important;
-    border:2px solid #d7d2c6!important;border-radius:16px!important;background:#fffdf9!important;
-    box-shadow:0 3px 10px rgba(70,60,45,.04)!important
+.writer-selected .name{font-size:1.13rem;font-weight:900;color:#344136}
+.writer-selected .sub{font-size:.86rem;color:#687264;margin-top:2px}
+.writer-unselected{
+    padding:14px 18px;border:1px solid #d7d2c6;border-radius:16px;background:#fffdf9;
+    min-height:72px
 }
-div[data-testid="stRadio"]:has(input[name="writer_choice"]) label:has(input:checked){
-    border-color:#64735e!important;background:#edf2e9!important;box-shadow:0 4px 14px rgba(75,95,70,.10)!important
-}
-div[data-testid="stRadio"]:has(input[name="writer_choice"]) label p{
-    font-size:1.12rem!important;font-weight:850!important;color:#344136!important
-}
-div[data-testid="stRadio"] label p,div[data-testid="stRadio"] label span{
-    color:#343a33!important;-webkit-text-fill-color:#343a33!important;opacity:1!important;font-weight:750!important
-}
+.writer-unselected .name{font-size:1.13rem;font-weight:850;color:#4c514b}
+.writer-unselected .sub{font-size:.86rem;color:#8a887f;margin-top:2px}
 [data-testid="stWidgetLabel"] p{color:#40463e!important;opacity:1!important;font-size:1rem!important;font-weight:750!important}
 
 /* Inputs */
@@ -170,14 +169,23 @@ with c3:
 
 if "main_menu" not in st.session_state:
     st.session_state["main_menu"] = "✍️ 말씀 기록"
+if "active_writer" not in st.session_state:
+    st.session_state["active_writer"] = "Gahyang"
 
-menu = st.radio(
-    "메뉴",
-    ["✍️ 말씀 기록", "📊 나의 진행", "🗂️ 지난 기록"],
-    horizontal=True,
-    label_visibility="collapsed",
-    key="main_menu"
-)
+menu_names=["✍️ 말씀 기록","📊 나의 진행","🗂️ 지난 기록"]
+nav1,nav2,nav3=st.columns(3)
+for col,name in zip([nav1,nav2,nav3],menu_names):
+    selected = st.session_state["main_menu"] == name
+    label = ("● " if selected else "") + name
+    col.button(
+        label,
+        key=f"nav_{name}",
+        use_container_width=True,
+        type="primary" if selected else "secondary",
+        on_click=set_menu,
+        args=(name,)
+    )
+menu=st.session_state["main_menu"]
 
 if menu == "✍️ 말씀 기록":
     # 과거 기록은 '지난 기록 > 기록 열기'로 들어왔을 때만 불러옴
@@ -190,14 +198,36 @@ if menu == "✍️ 말씀 기록":
         if editing:
             st.button("＋ 새 기록", use_container_width=True, on_click=new_record)
 
-    default_display = DB_TO_DISPLAY.get(editing.get("writer"), "Gahyang") if editing else "Gahyang"
-    display_writer=st.radio(
-        "작성자",
-        ["Gahyang","Mija"],
-        index=["Gahyang","Mija"].index(default_display),
-        horizontal=True,
-        key=f"writer_choice_{editing.get('id') if editing else 'new'}"
-    )
+    default_display = DB_TO_DISPLAY.get(editing.get("writer"), "Gahyang") if editing else st.session_state.get("active_writer","Gahyang")
+    if editing:
+        st.session_state["active_writer"] = default_display
+
+    st.markdown('<div class="writer-label">작성자</div>',unsafe_allow_html=True)
+    wc1,wc2=st.columns(2)
+    for col,w,icon,kr in [
+        (wc1,"Gahyang","🌿","가향"),
+        (wc2,"Mija","🌸","미자")
+    ]:
+        selected = st.session_state.get("active_writer","Gahyang") == w
+        box_class="writer-selected" if selected else "writer-unselected"
+        mark=" · 선택됨" if selected else ""
+        col.markdown(
+            f'<div class="{box_class}"><div class="name">{icon} {w}</div>'
+            f'<div class="sub">{kr}{mark}</div></div>',
+            unsafe_allow_html=True
+        )
+        if col.button(
+            f"{'✓ ' if selected else ''}{w} 선택",
+            key=f"writer_btn_{w}_{editing.get('id') if editing else 'new'}",
+            use_container_width=True,
+            type="primary" if selected else "secondary",
+            disabled=selected,
+            on_click=set_writer,
+            args=(w,)
+        ):
+            pass
+
+    display_writer=st.session_state.get("active_writer","Gahyang")
     db_writer=DISPLAY_TO_DB[display_writer]
 
     default_book = editing.get("book") if editing and editing.get("book") in ALL_BOOKS else ALL_BOOKS[0]
@@ -305,7 +335,14 @@ if menu == "✍️ 말씀 기록":
 
 elif menu == "📊 나의 진행":
     st.markdown('<div class="section-title">나의 진행 현황</div>',unsafe_allow_html=True)
-    person=st.radio("작성자 선택",["Gahyang","Mija"],horizontal=True,key="progress_writer")
+    st.markdown("**작성자 선택**")
+    pc1,pc2=st.columns(2)
+    current_progress=st.session_state.get("progress_writer","Gahyang")
+    if pc1.button(("✓ " if current_progress=="Gahyang" else "")+"🌿 Gahyang",key="progress_g",use_container_width=True,type="primary" if current_progress=="Gahyang" else "secondary"):
+        st.session_state["progress_writer"]="Gahyang"; st.rerun()
+    if pc2.button(("✓ " if current_progress=="Mija" else "")+"🌸 Mija",key="progress_m",use_container_width=True,type="primary" if current_progress=="Mija" else "secondary"):
+        st.session_state["progress_writer"]="Mija"; st.rerun()
+    person=st.session_state.get("progress_writer","Gahyang")
     dbp=DISPLAY_TO_DB[person]
     mine=[r for r in rows if r.get("writer")==dbp]
     done=[r for r in mine if is_complete(r)]
@@ -333,7 +370,7 @@ elif menu == "📊 나의 진행":
 
 elif menu == "🗂️ 지난 기록":
     st.markdown('<div class="section-title">지난 기록</div>',unsafe_allow_html=True)
-    st.caption("이어 쓰거나 수정할 기록은 아래에서 ‘기록 열기’를 눌러 주세요.")
+    st.caption("Gahyang과 Mija의 전체 기록입니다. 작성자·성경·상태별로 골라 볼 수 있으며, 이어 쓰거나 수정할 때는 ‘기록 열기’를 눌러 주세요.")
     f1,f2,f3=st.columns(3)
     who=f1.selectbox("작성자",["전체","Gahyang","Mija"],key="hist_writer")
     book_filter=f2.selectbox("성경",["전체"]+ALL_BOOKS,key="hist_book")
