@@ -247,18 +247,59 @@ menu=st.session_state["main_menu"]
 if menu == "✍️ 말씀 기록":
     # 과거 기록은 '지난 기록 > 기록 열기'로 들어왔을 때만 불러옴
     st.markdown('<div class="section-title">🎵 배경음악</div>', unsafe_allow_html=True)
-    music1 = Path(__file__).with_name("worship_1.mp3")
-    music2 = Path(__file__).with_name("worship_2.mp3")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**찬양 연주 1**")
-        if music1.exists():
-            st.audio(str(music1), format="audio/mpeg", loop=True)
-    with c2:
-        st.markdown("**찬양 피아노 2**")
-        if music2.exists():
-            st.audio(str(music2), format="audio/mpeg", loop=True)
-    st.caption("원하는 곡의 ▶ 재생 버튼 선택 · 반복 재생")
+    music_files = ["worship_1.mp3", "worship_2.mp3"]
+    music_files = [m for m in music_files if Path(__file__).with_name(m).exists()]
+    if music_files:
+        # 페이지 세션마다 시작 순서를 무작위로 결정. 이후 곡은 자동으로 연속 재생.
+        import base64, random
+        if "music_order" not in st.session_state or set(st.session_state["music_order"]) != set(music_files):
+            order = music_files[:]
+            random.shuffle(order)
+            st.session_state["music_order"] = order
+
+        sources = []
+        for filename in st.session_state["music_order"]:
+            raw = Path(__file__).with_name(filename).read_bytes()
+            sources.append("data:audio/mpeg;base64," + base64.b64encode(raw).decode("ascii"))
+
+        playlist_json = __import__("json").dumps(sources)
+        components.html(f"""
+        <div style="font-family:inherit;padding:2px 0 6px">
+          <button id="musicToggle" type="button"
+            style="border:1px solid #8b9784;background:#6d7d68;color:white;border-radius:10px;
+                   padding:9px 18px;font-size:14px;cursor:pointer;min-width:132px">
+            ▶ 음악 재생
+          </button>
+          <span id="musicStatus" style="margin-left:10px;color:#777;font-size:13px">꺼짐</span>
+          <audio id="bgm" preload="metadata"></audio>
+        </div>
+        <script>
+        const playlist={playlist_json};
+        const audio=document.getElementById("bgm");
+        const btn=document.getElementById("musicToggle");
+        const status=document.getElementById("musicStatus");
+        let index=0;
+        let playing=false;
+        function loadCurrent(){{ audio.src=playlist[index]; }}
+        loadCurrent();
+        btn.addEventListener("click", async ()=>{{
+          if(!playing){{
+            try{{
+              await audio.play();
+              playing=true; btn.textContent="■ 음악 끄기"; status.textContent="재생 중";
+            }}catch(e){{ status.textContent="재생 버튼을 다시 눌러주세요"; }}
+          }}else{{
+            audio.pause(); playing=false; btn.textContent="▶ 음악 재생"; status.textContent="꺼짐";
+          }}
+        }});
+        audio.addEventListener("ended", ()=>{{
+          index=(index+1)%playlist.length;
+          loadCurrent();
+          if(playing) audio.play();
+        }});
+        </script>
+        """, height=58)
+        st.caption("재생 시 두 곡 연속 재생 · 시작 곡 무작위 선택 · 마지막 곡 후 계속 반복")
     editing = find_record_by_id(st.session_state.get("edit_record_id"))
 
     top_l, top_r = st.columns([5,1])
