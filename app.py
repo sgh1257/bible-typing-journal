@@ -247,10 +247,18 @@ menu=st.session_state["main_menu"]
 if menu == "✍️ 말씀 기록":
     # 과거 기록은 '지난 기록 > 기록 열기'로 들어왔을 때만 불러옴
     st.markdown('<div class="section-title">🎵 배경음악</div>', unsafe_allow_html=True)
-    bgm_path = Path(__file__).with_name("quiet_bible_bgm.wav")
-    if bgm_path.exists():
-        st.audio(str(bgm_path), format="audio/wav", loop=True)
-        st.caption("잔잔한 배경음악 · 재생 버튼으로 시작 · 반복 재생")
+    music1 = Path(__file__).with_name("worship_1.mp3")
+    music2 = Path(__file__).with_name("worship_2.mp3")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**찬양 연주 1**")
+        if music1.exists():
+            st.audio(str(music1), format="audio/mpeg", loop=True)
+    with c2:
+        st.markdown("**찬양 피아노 2**")
+        if music2.exists():
+            st.audio(str(music2), format="audio/mpeg", loop=True)
+    st.caption("원하는 곡의 ▶ 재생 버튼 선택 · 반복 재생")
     editing = find_record_by_id(st.session_state.get("edit_record_id"))
 
     top_l, top_r = st.columns([5,1])
