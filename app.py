@@ -1,3 +1,4 @@
+from pathlib import Path
 import streamlit as st
 from datetime import date
 import re
@@ -62,16 +63,26 @@ def open_record(record_id):
     st.session_state["edit_record_id"] = record_id
     st.session_state["main_menu"] = "✍️ 말씀 기록"
 
+def bump_editor_nonce():
+    st.session_state["editor_nonce"] = st.session_state.get("editor_nonce", 0) + 1
+
 def new_record():
     st.session_state.pop("edit_record_id", None)
     st.session_state["main_menu"] = "✍️ 말씀 기록"
-    st.session_state["active_writer"] = "Gahyang"
+    bump_editor_nonce()
 
 def set_menu(menu_name):
+    # 말씀 기록 버튼을 누를 때마다 새 기록 화면
+    if menu_name == "✍️ 말씀 기록":
+        st.session_state.pop("edit_record_id", None)
+        bump_editor_nonce()
     st.session_state["main_menu"] = menu_name
 
 def set_writer(writer_name):
+    # 작성자 변경 시 다른 작성자의 본문이 남지 않도록 새 기록으로 전환
     st.session_state["active_writer"] = writer_name
+    st.session_state.pop("edit_record_id", None)
+    bump_editor_nonce()
 
 def plain_to_quill_html(body):
     """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
@@ -215,6 +226,8 @@ if "main_menu" not in st.session_state:
     st.session_state["main_menu"] = "✍️ 말씀 기록"
 if "active_writer" not in st.session_state:
     st.session_state["active_writer"] = "Gahyang"
+if "editor_nonce" not in st.session_state:
+    st.session_state["editor_nonce"] = 0
 
 menu_names=["✍️ 말씀 기록","📊 나의 진행","🗂️ 지난 기록"]
 nav1,nav2,nav3=st.columns(3)
@@ -233,6 +246,11 @@ menu=st.session_state["main_menu"]
 
 if menu == "✍️ 말씀 기록":
     # 과거 기록은 '지난 기록 > 기록 열기'로 들어왔을 때만 불러옴
+    st.markdown('<div class="section-title">🎵 배경음악</div>', unsafe_allow_html=True)
+    bgm_path = Path(__file__).with_name("quiet_bible_bgm.wav")
+    if bgm_path.exists():
+        st.audio(str(bgm_path), format="audio/wav", loop=True)
+        st.caption("잔잔한 배경음악 · 재생 버튼으로 시작 · 반복 재생")
     editing = find_record_by_id(st.session_state.get("edit_record_id"))
 
     top_l, top_r = st.columns([5,1])
@@ -319,27 +337,39 @@ if menu == "✍️ 말씀 기록":
         '<div class="guide">말씀을 한 절씩 천천히 기록해 보세요.</div></div>',
         unsafe_allow_html=True
     )
-    initial_body=editing.get("body","") if editing else ""
+    editing_matches = bool(
+        editing
+        and editing.get("writer") == db_writer
+        and editing.get("book") == book
+        and int(editing.get("chapter", 0)) == int(chapter)
+    )
+    initial_body=editing.get("body","") if editing_matches else ""
+    editor_context=f"{display_writer}_{book}_{chapter}_{st.session_state.get('editor_nonce',0)}"
     editor_html=st_quill(
         value=plain_to_quill_html(initial_body),
         html=True,
         toolbar=[],
         placeholder="1절 말씀을 입력하세요.",
-        key=f"verse_editor_{editing.get('id') if editing else 'new'}"
+        key=f"verse_editor_{editor_context}"
     )
     body=quill_to_plain(editor_html)
 
-    # 브라우저 맞춤법 검사 해제 + 편집기 글씨/절 간격 조정
+    # 편집기 모양/들여쓰기 보정 + 브라우저 맞춤법 검사 해제
     components.html("""
     <script>
-    function tuneEditor(){
+    function tune(){
       try{
-        const frames = window.parent.document.querySelectorAll('iframe');
-        frames.forEach((frame)=>{
+        const pdoc=window.parent.document;
+        pdoc.querySelectorAll('textarea, input[type="text"]').forEach(el=>{
+          el.setAttribute('spellcheck','false');
+          el.setAttribute('autocorrect','off');
+          el.setAttribute('autocapitalize','off');
+        });
+        pdoc.querySelectorAll('iframe').forEach(frame=>{
           try{
-            const doc = frame.contentDocument || frame.contentWindow.document;
+            const doc=frame.contentDocument || frame.contentWindow.document;
             if(!doc) return;
-            const editor = doc.querySelector('.ql-editor');
+            const editor=doc.querySelector('.ql-editor');
             if(editor){
               editor.setAttribute('spellcheck','false');
               editor.setAttribute('autocorrect','off');
@@ -347,33 +377,35 @@ if menu == "✍️ 말씀 기록":
               editor.style.fontSize='18px';
               editor.style.lineHeight='1.75';
               editor.style.minHeight='390px';
-              const lis=editor.querySelectorAll('li');
-              lis.forEach(li=>{
+              editor.querySelectorAll('ol, ul').forEach(list=>{
+                list.style.paddingLeft='2.1em';
+                list.style.marginLeft='0';
+              });
+              editor.querySelectorAll('li').forEach(li=>{
+                li.style.marginLeft='0';
+                li.style.paddingLeft='0';
+                li.style.textIndent='0';
                 li.style.marginBottom='13px';
-                li.style.paddingLeft='6px';
+              });
+              // 삭제 후 Quill이 남기는 하위 목록 단계 제거
+              editor.querySelectorAll('li.ql-indent-1,li.ql-indent-2,li.ql-indent-3,li.ql-indent-4,li.ql-indent-5,li.ql-indent-6,li.ql-indent-7,li.ql-indent-8').forEach(li=>{
+                for(let i=1;i<=8;i++) li.classList.remove('ql-indent-'+i);
               });
             }
             const toolbar=doc.querySelector('.ql-toolbar');
             if(toolbar) toolbar.style.display='none';
-            const container=doc.querySelector('.ql-container');
-            if(container){
-              container.style.borderTop='1px solid #ded7ca';
-              container.style.fontFamily='inherit';
-            }
           }catch(e){}
         });
       }catch(e){}
     }
-    setTimeout(tuneEditor,250);
-    setTimeout(tuneEditor,800);
-    setTimeout(tuneEditor,1600);
+    setInterval(tune,500);
     </script>
     """, height=0)
     st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
 
     st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
     reflection=""
-    if editing:
+    if editing_matches:
         reflection=(editing.get("note") or "").strip()
         fav=(editing.get("favorite") or "").strip()
         if not reflection and fav: reflection=fav
@@ -383,7 +415,7 @@ if menu == "✍️ 말씀 기록":
         value=reflection,
         height=125,
         placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
-        key=f"reflection_{editing.get('id') if editing else 'new'}"
+        key=f"reflection_{editor_context}"
     )
 
     st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
@@ -396,7 +428,7 @@ if menu == "✍️ 말씀 기록":
             "note":reflection,"completed":False
         }
         try:
-            save_record(editing,payload)
+            save_record(editing if editing_matches else None,payload)
             st.success(f"💾 {display_writer} · {book} {chapter}장 내용을 임시 저장했습니다.")
             st.session_state.pop("edit_record_id", None)
             refresh()
@@ -414,7 +446,7 @@ if menu == "✍️ 말씀 기록":
                 "note":reflection,"completed":True
             }
             try:
-                save_record(editing,payload)
+                save_record(editing if editing_matches else None,payload)
                 st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
                 st.session_state.pop("edit_record_id", None)
                 refresh()
