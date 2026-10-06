@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 import streamlit as st
 from datetime import date
 import re
@@ -58,6 +59,22 @@ def save_record(existing, payload):
     if existing and existing.get("id") is not None:
         return sb.table("bible_records").update(payload).eq("id", existing["id"]).execute()
     return sb.table("bible_records").insert(payload).execute()
+
+
+def autosave_record(existing, payload):
+    """자동 임시저장: 같은 장이 있으면 갱신, 없으면 새 기록 생성."""
+    if existing and existing.get("id") is not None:
+        sb.table("bible_records").update(payload).eq("id", existing["id"]).execute()
+        return existing["id"]
+    found=(sb.table("bible_records").select("id")
+           .eq("writer",payload["writer"]).eq("book",payload["book"])
+           .eq("chapter",payload["chapter"]).limit(1).execute())
+    if found.data:
+        rid=found.data[0]["id"]
+        sb.table("bible_records").update(payload).eq("id",rid).execute()
+        return rid
+    created=sb.table("bible_records").insert(payload).execute()
+    return created.data[0]["id"] if created.data else None
 
 def open_record(record_id):
     st.session_state["edit_record_id"] = record_id
@@ -364,6 +381,25 @@ if menu == "✍️ 말씀 기록":
         key=f"chapter_{editing.get('id') if editing else 'new'}"
     )
 
+    selected_existing=None
+    if not editing:
+        selected_existing=next((
+            r for r in rows
+            if r.get("writer")==db_writer
+            and r.get("book")==book
+            and int(r.get("chapter",0))==int(chapter)
+        ),None)
+
+    if selected_existing:
+        st.warning(f"📖 {book} {chapter}장은 이미 작성한 기록이 있습니다. 기존 기록을 불러와 다시 작성하시겠습니까?")
+        if st.button("기존 기록 열기",use_container_width=True,type="primary",
+                     key=f"open_existing_{selected_existing.get('id')}"):
+            st.session_state["edit_record_id"]=selected_existing.get("id")
+            bump_editor_nonce()
+            st.rerun()
+        st.caption("새 기록을 작성하려면 위에서 다른 장을 선택해 주세요.")
+        st.stop()
+
     if editing:
         status="완료" if is_complete(editing) else "작성 중"
         st.markdown(
@@ -447,7 +483,9 @@ if menu == "✍️ 말씀 기록":
         });
       }catch(e){}
     }
-    setInterval(tune,500);
+    tune();
+    setTimeout(tune,300);
+    setTimeout(tune,1000);
     </script>
     """, height=0)
     st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
@@ -466,6 +504,25 @@ if menu == "✍️ 말씀 기록":
         placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
         key=f"reflection_{editor_context}"
     )
+
+    autosave_key=f"autosave_{display_writer}_{book}_{chapter}"
+    now=time.time()
+    if autosave_key not in st.session_state:
+        st.session_state[autosave_key]=now
+    if body.strip() and now-st.session_state[autosave_key] >= 60:
+        auto_payload={
+            "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
+            "chapter":chapter,"body":body,"favorite":"",
+            "note":reflection,"completed":False
+        }
+        try:
+            saved_id=autosave_record(editing if editing_matches else None,auto_payload)
+            st.session_state[autosave_key]=now
+            if saved_id:
+                st.session_state["edit_record_id"]=saved_id
+            st.caption("✓ 자동 저장됨 · 1분 간격 임시 저장")
+        except Exception:
+            st.caption("자동 저장 실패 · 필요하면 💾 임시 저장을 이용해 주세요.")
 
     st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
     save_col,done_col=st.columns(2)
