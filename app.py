@@ -1,5 +1,4 @@
 from pathlib import Path
-import time
 import streamlit as st
 from datetime import date
 import re
@@ -60,22 +59,6 @@ def save_record(existing, payload):
         return sb.table("bible_records").update(payload).eq("id", existing["id"]).execute()
     return sb.table("bible_records").insert(payload).execute()
 
-
-def autosave_record(existing, payload):
-    """자동 임시저장: 같은 장이 있으면 갱신, 없으면 새 기록 생성."""
-    if existing and existing.get("id") is not None:
-        sb.table("bible_records").update(payload).eq("id", existing["id"]).execute()
-        return existing["id"]
-    found=(sb.table("bible_records").select("id")
-           .eq("writer",payload["writer"]).eq("book",payload["book"])
-           .eq("chapter",payload["chapter"]).limit(1).execute())
-    if found.data:
-        rid=found.data[0]["id"]
-        sb.table("bible_records").update(payload).eq("id",rid).execute()
-        return rid
-    created=sb.table("bible_records").insert(payload).execute()
-    return created.data[0]["id"] if created.data else None
-
 def open_record(record_id):
     st.session_state["edit_record_id"] = record_id
     st.session_state["main_menu"] = "✍️ 말씀 기록"
@@ -100,6 +83,10 @@ def set_writer(writer_name):
     st.session_state["active_writer"] = writer_name
     st.session_state.pop("edit_record_id", None)
     bump_editor_nonce()
+
+def mark_bible_selection_changed():
+    # 앱 최초 실행이 아니라 사용자가 성경/장을 직접 변경한 경우만 기록 존재 여부 확인
+    st.session_state["bible_selection_changed"] = True
 
 def plain_to_quill_html(body):
     """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
@@ -245,6 +232,8 @@ if "active_writer" not in st.session_state:
     st.session_state["active_writer"] = "Gahyang"
 if "editor_nonce" not in st.session_state:
     st.session_state["editor_nonce"] = 0
+if "bible_selection_changed" not in st.session_state:
+    st.session_state["bible_selection_changed"] = False
 
 menu_names=["✍️ 말씀 기록","📊 나의 진행","🗂️ 지난 기록"]
 nav1,nav2,nav3=st.columns(3)
@@ -371,33 +360,43 @@ if menu == "✍️ 말씀 기록":
         "성경",
         ALL_BOOKS,
         index=ALL_BOOKS.index(default_book),
-        key=f"book_{editing.get('id') if editing else 'new'}"
+        key=f"book_{editing.get('id') if editing else 'new'}",
+        on_change=mark_bible_selection_changed
     )
     chapter_options=list(range(1,BOOK_MAP[book]+1))
     chapter=d.selectbox(
         "장",
         chapter_options,
         index=chapter_options.index(default_chapter) if default_chapter in chapter_options else 0,
-        key=f"chapter_{editing.get('id') if editing else 'new'}"
+        key=f"chapter_{editing.get('id') if editing else 'new'}",
+        on_change=mark_bible_selection_changed
     )
 
-    selected_existing=None
-    if not editing:
-        selected_existing=next((
+    selected_existing = None
+    if (not editing) and st.session_state.get("bible_selection_changed", False):
+        selected_existing = next((
             r for r in rows
-            if r.get("writer")==db_writer
-            and r.get("book")==book
-            and int(r.get("chapter",0))==int(chapter)
-        ),None)
+            if r.get("writer") == db_writer
+            and r.get("book") == book
+            and int(r.get("chapter", 0)) == int(chapter)
+        ), None)
 
     if selected_existing:
-        st.warning(f"📖 {book} {chapter}장은 이미 작성한 기록이 있습니다. 기존 기록을 불러와 다시 작성하시겠습니까?")
-        if st.button("기존 기록 열기",use_container_width=True,type="primary",
-                     key=f"open_existing_{selected_existing.get('id')}"):
-            st.session_state["edit_record_id"]=selected_existing.get("id")
+        st.warning(
+            f"📖 {book} {chapter}장은 이미 작성한 기록이 있습니다. "
+            "기존 기록을 불러와 다시 작성하시겠습니까?"
+        )
+        if st.button(
+            "기존 기록 열기",
+            use_container_width=True,
+            type="primary",
+            key=f"open_existing_{selected_existing.get('id')}"
+        ):
+            st.session_state["bible_selection_changed"] = False
+            st.session_state["edit_record_id"] = selected_existing.get("id")
             bump_editor_nonce()
             st.rerun()
-        st.caption("새 기록을 작성하려면 위에서 다른 장을 선택해 주세요.")
+        st.caption("다른 장을 작성하려면 위에서 성경 또는 장을 다시 선택해 주세요.")
         st.stop()
 
     if editing:
@@ -504,25 +503,6 @@ if menu == "✍️ 말씀 기록":
         placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
         key=f"reflection_{editor_context}"
     )
-
-    autosave_key=f"autosave_{display_writer}_{book}_{chapter}"
-    now=time.time()
-    if autosave_key not in st.session_state:
-        st.session_state[autosave_key]=now
-    if body.strip() and now-st.session_state[autosave_key] >= 60:
-        auto_payload={
-            "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
-            "chapter":chapter,"body":body,"favorite":"",
-            "note":reflection,"completed":False
-        }
-        try:
-            saved_id=autosave_record(editing if editing_matches else None,auto_payload)
-            st.session_state[autosave_key]=now
-            if saved_id:
-                st.session_state["edit_record_id"]=saved_id
-            st.caption("✓ 자동 저장됨 · 1분 간격 임시 저장")
-        except Exception:
-            st.caption("자동 저장 실패 · 필요하면 💾 임시 저장을 이용해 주세요.")
 
     st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
     save_col,done_col=st.columns(2)
