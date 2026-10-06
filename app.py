@@ -360,8 +360,7 @@ if menu == "✍️ 말씀 기록":
         "성경",
         ALL_BOOKS,
         index=ALL_BOOKS.index(default_book),
-        key=f"book_{editing.get('id') if editing else 'new'}",
-        on_change=mark_bible_selection_changed
+        key=f"book_{editing.get('id') if editing else 'new'}"
     )
     chapter_options=list(range(1,BOOK_MAP[book]+1))
     chapter=d.selectbox(
@@ -382,9 +381,15 @@ if menu == "✍️ 말씀 기록":
         ), None)
 
     if selected_existing:
-        st.warning(
-            f"📖 {book} {chapter}장은 이미 작성한 기록이 있습니다. "
-            "기존 기록을 불러와 다시 작성하시겠습니까?"
+        st.markdown(
+            f"""
+            <div style="background:#fff4c7;border:1px solid #eadb8c;border-radius:10px;
+                        padding:14px 16px;color:#3d432f;font-weight:600;margin:10px 0 12px;">
+                📖 {book} {chapter}장은 이미 작성한 기록이 있습니다.<br>
+                기존 기록을 불러와 다시 작성하시겠습니까?
+            </div>
+            """,
+            unsafe_allow_html=True
         )
         if st.button(
             "기존 기록 열기",
