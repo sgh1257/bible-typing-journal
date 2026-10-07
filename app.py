@@ -305,7 +305,6 @@ if menu == "✍️ 말씀 기록":
         }});
         </script>
         """, height=58)
-        st.caption("재생 시 두 곡 연속 재생 · 시작 곡 무작위 선택 · 마지막 곡 후 계속 반복")
     editing = find_record_by_id(st.session_state.get("edit_record_id"))
 
     top_l, top_r = st.columns([5,1])
@@ -443,55 +442,6 @@ if menu == "✍️ 말씀 기록":
     )
     body=quill_to_plain(editor_html)
 
-    # 편집기 모양/들여쓰기 보정 + 브라우저 맞춤법 검사 해제
-    components.html("""
-    <script>
-    function tune(){
-      try{
-        const pdoc=window.parent.document;
-        pdoc.querySelectorAll('textarea, input[type="text"]').forEach(el=>{
-          el.setAttribute('spellcheck','false');
-          el.setAttribute('autocorrect','off');
-          el.setAttribute('autocapitalize','off');
-        });
-        pdoc.querySelectorAll('iframe').forEach(frame=>{
-          try{
-            const doc=frame.contentDocument || frame.contentWindow.document;
-            if(!doc) return;
-            const editor=doc.querySelector('.ql-editor');
-            if(editor){
-              editor.setAttribute('spellcheck','false');
-              editor.setAttribute('autocorrect','off');
-              editor.setAttribute('autocapitalize','off');
-              editor.style.fontSize='18px';
-              editor.style.lineHeight='1.75';
-              editor.style.minHeight='390px';
-              editor.querySelectorAll('ol, ul').forEach(list=>{
-                list.style.paddingLeft='2.1em';
-                list.style.marginLeft='0';
-              });
-              editor.querySelectorAll('li').forEach(li=>{
-                li.style.marginLeft='0';
-                li.style.paddingLeft='0';
-                li.style.textIndent='0';
-                li.style.marginBottom='13px';
-              });
-              // 삭제 후 Quill이 남기는 하위 목록 단계 제거
-              editor.querySelectorAll('li.ql-indent-1,li.ql-indent-2,li.ql-indent-3,li.ql-indent-4,li.ql-indent-5,li.ql-indent-6,li.ql-indent-7,li.ql-indent-8').forEach(li=>{
-                for(let i=1;i<=8;i++) li.classList.remove('ql-indent-'+i);
-              });
-            }
-            const toolbar=doc.querySelector('.ql-toolbar');
-            if(toolbar) toolbar.style.display='none';
-          }catch(e){}
-        });
-      }catch(e){}
-    }
-    tune();
-    setTimeout(tune,300);
-    setTimeout(tune,1000);
-    </script>
-    """, height=0)
     st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
 
     st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
