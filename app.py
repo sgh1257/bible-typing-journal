@@ -442,6 +442,76 @@ if menu == "✍️ 말씀 기록":
             placeholder="1절 말씀을 입력하세요.",
             key=f"verse_editor_{editor_context}"
         )
+
+        # Quill 편집기 가독성 설정 - 최초 로드 시 1회 적용
+        # 반복 실행(setInterval) 없이 CSS와 spellcheck 속성만 설정
+        components.html("""
+        <script>
+        (function () {
+          function applyEditorStyle() {
+            const frames = window.parent.document.querySelectorAll('iframe');
+            for (const frame of frames) {
+              try {
+                const doc = frame.contentDocument || frame.contentWindow.document;
+                const editor = doc && doc.querySelector('.ql-editor');
+                if (!editor) continue;
+
+                // 맞춤법 빨간 밑줄 제거
+                editor.setAttribute('spellcheck', 'false');
+                editor.setAttribute('autocorrect', 'off');
+                editor.setAttribute('autocapitalize', 'off');
+
+                // iframe 내부에 CSS를 단 한 번만 삽입
+                if (!doc.getElementById('bible-editor-style')) {
+                  const style = doc.createElement('style');
+                  style.id = 'bible-editor-style';
+                  style.textContent = `
+                    .ql-editor {
+                      font-size: 19px !important;
+                      line-height: 1.85 !important;
+                    }
+                    .ql-editor ol {
+                      padding-left: 2.2em !important;
+                    }
+                    .ql-editor ol > li {
+                      font-size: 19px !important;
+                      line-height: 1.85 !important;
+                      margin-bottom: 12px !important;
+                      padding-bottom: 0 !important;
+                    }
+                    .ql-editor ol > li:last-child {
+                      margin-bottom: 0 !important;
+                    }
+                    .ql-editor * {
+                      text-decoration: none !important;
+                    }
+                  `;
+                  doc.head.appendChild(style);
+                }
+                return true;
+              } catch (e) {}
+            }
+            return false;
+          }
+
+          // 일반 입력창(오늘의 말씀 기록 등) 맞춤법 밑줄 제거
+          try {
+            window.parent.document.querySelectorAll('textarea, input[type="text"]').forEach(function(el) {
+              el.setAttribute('spellcheck', 'false');
+              el.setAttribute('autocorrect', 'off');
+              el.setAttribute('autocapitalize', 'off');
+            });
+          } catch (e) {}
+
+          // 편집기 iframe 생성 직후만 짧게 확인하고 종료
+          if (!applyEditorStyle()) {
+            setTimeout(applyEditorStyle, 120);
+            setTimeout(applyEditorStyle, 350);
+          }
+        })();
+        </script>
+        """, height=0)
+
         body=quill_to_plain(editor_html)
 
         st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
