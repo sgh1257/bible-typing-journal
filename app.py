@@ -91,13 +91,13 @@ def mark_bible_selection_changed():
 def plain_to_quill_html(body):
     """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
     if not body or not body.strip():
-        return '<ol><li><span class="ql-size-large"><br></span></li></ol>'
+        return '<ol><li style="font-size:18px;line-height:1.9;margin-bottom:10px;"><br></li></ol>'
     lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
     items=[]
     for ln in lines:
         ln=re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
         safe=ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-        items.append(f'<li><span class="ql-size-large">{safe}</span></li>')
+        items.append(f'<li style="font-size:18px;line-height:1.9;margin-bottom:10px;">{safe}</li>')
     return "<ol>"+"".join(items)+"</ol>"
 
 def quill_to_plain(html):
