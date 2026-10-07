@@ -202,33 +202,47 @@ def mark_bible_selection_changed():
     st.session_state["bible_selection_changed"] = True
 
 def plain_to_quill_html(body):
-    """기존 일반 텍스트를 절 번호 목록 HTML로 변환."""
+    """DB의 일반 텍스트를 절 번호 목록으로 변환.
+    과거 버전에서 저장된 '1  1 본문', '1. 1 본문' 같은 중복 번호도 정리.
+    """
     if not body or not body.strip():
         return "<ol><li><br></li></ol>"
     lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
     items=[]
     for ln in lines:
-        ln=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s*", "", ln)
+        # 줄 앞에 붙은 절 번호를 반복 제거
+        # 예: '1  본문', '1. 본문', '1절 본문', '1 1 본문', '1. 1 본문'
+        previous=None
+        while previous != ln:
+            previous=ln
+            ln=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s+", "", ln).strip()
         safe=(ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
         items.append(f"<li>{safe}</li>")
     return "<ol>"+"".join(items)+"</ol>"
 
 def quill_to_plain(html):
-    """편집기 내용을 DB 저장용 일반 텍스트로 변환."""
+    """절 목록 HTML을 DB 저장용 일반 텍스트로 변환.
+    절 번호는 <ol>이 화면에서만 표시하므로 DB에는 저장하지 않음.
+    """
     if not html:
         return ""
     items=re.findall(r"<li[^>]*>(.*?)</li>", html, flags=re.S|re.I)
     if items:
         out=[]
-        for i,item in enumerate(items,1):
-            item=re.sub(r"<br\s*/?>", "\n", item, flags=re.I)
+        for item in items:
+            item=re.sub(r"<br\\s*/?>", "\\n", item, flags=re.I)
             item=re.sub(r"<[^>]+>", "", item)
             item=(item.replace("&nbsp;"," ").replace("&amp;","&")
                       .replace("&lt;","<").replace("&gt;",">")).strip()
+            # 혹시 편집기에 직접 들어온 앞쪽 절 번호도 제거
+            previous=None
+            while previous != item:
+                previous=item
+                item=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s+", "", item).strip()
             if item:
-                out.append(f"{i}  {item}")
-        return "\n".join(out)
-    text=re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
+                out.append(item)
+        return "\\n".join(out)
+    text=re.sub(r"<br\\s*/?>", "\\n", html, flags=re.I)
     text=re.sub(r"<[^>]+>", "", text)
     return text.strip()
 
@@ -582,9 +596,17 @@ if menu == "✍️ 말씀 기록":
                 "note":reflection,"completed":False
             }
             try:
-                save_record(editing if editing_matches else None,payload)
+                result=save_record(editing if editing_matches else None,payload)
                 st.success(f"💾 {display_writer} · {book} {chapter}장 내용을 임시 저장했습니다.")
-                st.session_state.pop("edit_record_id", None)
+                # 저장 직후에는 '기존 기록 발견'으로 처리하지 않고,
+                # 방금 저장한 같은 기록을 편집 중인 상태로 유지
+                st.session_state["bible_selection_changed"] = False
+                saved_id = editing.get("id") if editing_matches else None
+                if not saved_id and getattr(result, "data", None):
+                    saved_id = result.data[0].get("id")
+                if saved_id is not None:
+                    st.session_state["edit_record_id"] = saved_id
+                bump_editor_nonce()
                 refresh()
             except Exception as e:
                 st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
@@ -600,9 +622,17 @@ if menu == "✍️ 말씀 기록":
                     "note":reflection,"completed":True
                 }
                 try:
-                    save_record(editing if editing_matches else None,payload)
+                    result=save_record(editing if editing_matches else None,payload)
                     st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
-                    st.session_state.pop("edit_record_id", None)
+                    # 완료 직후에도 현재 기록을 그대로 연 상태로 유지.
+                    # 사용자가 다른 장을 선택할 때만 기존 기록 여부를 확인.
+                    st.session_state["bible_selection_changed"] = False
+                    saved_id = editing.get("id") if editing_matches else None
+                    if not saved_id and getattr(result, "data", None):
+                        saved_id = result.data[0].get("id")
+                    if saved_id is not None:
+                        st.session_state["edit_record_id"] = saved_id
+                    bump_editor_nonce()
                     refresh()
                 except Exception as e:
                     st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
