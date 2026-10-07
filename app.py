@@ -2,8 +2,121 @@ from pathlib import Path
 import streamlit as st
 from datetime import date
 import re
-from streamlit_quill import st_quill
 import streamlit.components.v1 as components
+
+# ---------- 말씀 절 번호 전용 편집기 ----------
+# streamlit-quill 내부 iframe은 외부 CSS/맞춤법 설정을 안정적으로 받지 않아
+# 글씨 크기/절 간격/빨간 밑줄을 직접 제어할 수 있는 가벼운 편집기를 사용.
+_VERSE_COMPONENT_DIR = Path(__file__).parent / ".verse_editor_component"
+_VERSE_COMPONENT_DIR.mkdir(exist_ok=True)
+(_VERSE_COMPONENT_DIR / "index.html").write_text(r"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;padding:0;background:#fff;font-family:Arial,"Noto Sans KR",sans-serif;}
+.wrap{
+  box-sizing:border-box;
+  width:100%;
+  min-height:230px;
+  padding:14px 22px 18px 26px;
+  background:#fff;
+}
+#editor{
+  margin:0;
+  padding-left:2.25em;
+  min-height:195px;
+  outline:none;
+  font-size:19px;
+  line-height:1.85;
+  color:#20242a;
+}
+#editor li{
+  font-size:19px;
+  line-height:1.85;
+  margin:0 0 12px 0;
+  padding:0 0 0 3px;
+}
+#editor li:last-child{margin-bottom:0;}
+#editor:focus{outline:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <ol id="editor" contenteditable="true"
+      spellcheck="false" autocorrect="off" autocapitalize="off"></ol>
+</div>
+<script>
+function sendMessage(type,data){
+  const msg=Object.assign({isStreamlitMessage:true,type:type},data||{});
+  window.parent.postMessage(msg,"*");
+}
+function ready(){sendMessage("streamlit:componentReady",{apiVersion:1});}
+function frameHeight(){sendMessage("streamlit:setFrameHeight",{height:245});}
+function sendValue(){
+  const editor=document.getElementById("editor");
+  sendMessage("streamlit:setComponentValue",{
+    value:"<ol>"+editor.innerHTML+"</ol>",
+    dataType:"json"
+  });
+}
+const editor=document.getElementById("editor");
+let initialized=false;
+
+function normalizeInitial(html){
+  if(!html || !html.trim()) return "<li><br></li>";
+  const box=document.createElement("div");
+  box.innerHTML=html;
+  const ol=box.querySelector("ol");
+  return ol ? ol.innerHTML : html;
+}
+
+window.addEventListener("message",function(event){
+  if(!event.data || event.data.type!=="streamlit:render") return;
+  const args=event.data.args||{};
+  // 타이핑 중 재렌더링되어도 현재 커서/본문을 덮어쓰지 않음.
+  if(!initialized){
+    editor.innerHTML=normalizeInitial(args.value||"");
+    if(!editor.querySelector("li")) editor.innerHTML="<li><br></li>";
+    initialized=true;
+  }
+  editor.setAttribute("spellcheck","false");
+  editor.setAttribute("autocorrect","off");
+  editor.setAttribute("autocapitalize","off");
+  frameHeight();
+});
+
+editor.addEventListener("input",function(){
+  if(!editor.querySelector("li")) editor.innerHTML="<li><br></li>";
+  sendValue();
+});
+
+// 붙여넣기는 서식을 제거하고 일반 텍스트로 입력
+editor.addEventListener("paste",function(e){
+  e.preventDefault();
+  const text=(e.clipboardData||window.clipboardData).getData("text/plain");
+  document.execCommand("insertText",false,text);
+});
+
+// 빈 절에서 Enter를 두 번 눌러 목록이 풀리는 현상 방지
+editor.addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+    const sel=window.getSelection();
+    if(sel && sel.anchorNode && !editor.contains(sel.anchorNode)) return;
+  }
+});
+
+ready();
+frameHeight();
+</script>
+</body>
+</html>""", encoding="utf-8")
+
+_verse_editor = components.declare_component(
+    "bible_verse_editor",
+    path=str(_VERSE_COMPONENT_DIR)
+)
+
 from supabase import create_client
 
 st.set_page_config(page_title="말씀을 쓰다", page_icon="📖", layout="wide")
@@ -89,15 +202,15 @@ def mark_bible_selection_changed():
     st.session_state["bible_selection_changed"] = True
 
 def plain_to_quill_html(body):
-    """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
+    """기존 일반 텍스트를 절 번호 목록 HTML로 변환."""
     if not body or not body.strip():
-        return '<ol><li style="font-size:18px;line-height:1.9;margin-bottom:10px;"><br></li></ol>'
+        return "<ol><li><br></li></ol>"
     lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
     items=[]
     for ln in lines:
-        ln=re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
-        safe=ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-        items.append(f'<li style="font-size:18px;line-height:1.9;margin-bottom:10px;">{safe}</li>')
+        ln=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s*", "", ln)
+        safe=(ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
+        items.append(f"<li>{safe}</li>")
     return "<ol>"+"".join(items)+"</ol>"
 
 def quill_to_plain(html):
@@ -435,83 +548,11 @@ if menu == "✍️ 말씀 기록":
         )
         initial_body=editing.get("body","") if editing_matches else ""
         editor_context=f"{display_writer}_{book}_{chapter}_{st.session_state.get('editor_nonce',0)}"
-        editor_html=st_quill(
+        editor_html=_verse_editor(
             value=plain_to_quill_html(initial_body),
-            html=True,
-            toolbar=False,
-            placeholder="1절 말씀을 입력하세요.",
-            key=f"verse_editor_{editor_context}"
+            key=f"verse_editor_{editor_context}",
+            default=plain_to_quill_html(initial_body)
         )
-
-        # Quill 편집기 가독성 설정 - 최초 로드 시 1회 적용
-        # 반복 실행(setInterval) 없이 CSS와 spellcheck 속성만 설정
-        components.html("""
-        <script>
-        (function () {
-          function applyEditorStyle() {
-            const frames = window.parent.document.querySelectorAll('iframe');
-            for (const frame of frames) {
-              try {
-                const doc = frame.contentDocument || frame.contentWindow.document;
-                const editor = doc && doc.querySelector('.ql-editor');
-                if (!editor) continue;
-
-                // 맞춤법 빨간 밑줄 제거
-                editor.setAttribute('spellcheck', 'false');
-                editor.setAttribute('autocorrect', 'off');
-                editor.setAttribute('autocapitalize', 'off');
-
-                // iframe 내부에 CSS를 단 한 번만 삽입
-                if (!doc.getElementById('bible-editor-style')) {
-                  const style = doc.createElement('style');
-                  style.id = 'bible-editor-style';
-                  style.textContent = `
-                    .ql-editor {
-                      font-size: 19px !important;
-                      line-height: 1.85 !important;
-                    }
-                    .ql-editor ol {
-                      padding-left: 2.2em !important;
-                    }
-                    .ql-editor ol > li {
-                      font-size: 19px !important;
-                      line-height: 1.85 !important;
-                      margin-bottom: 12px !important;
-                      padding-bottom: 0 !important;
-                    }
-                    .ql-editor ol > li:last-child {
-                      margin-bottom: 0 !important;
-                    }
-                    .ql-editor * {
-                      text-decoration: none !important;
-                    }
-                  `;
-                  doc.head.appendChild(style);
-                }
-                return true;
-              } catch (e) {}
-            }
-            return false;
-          }
-
-          // 일반 입력창(오늘의 말씀 기록 등) 맞춤법 밑줄 제거
-          try {
-            window.parent.document.querySelectorAll('textarea, input[type="text"]').forEach(function(el) {
-              el.setAttribute('spellcheck', 'false');
-              el.setAttribute('autocorrect', 'off');
-              el.setAttribute('autocapitalize', 'off');
-            });
-          } catch (e) {}
-
-          // 편집기 iframe 생성 직후만 짧게 확인하고 종료
-          if (!applyEditorStyle()) {
-            setTimeout(applyEditorStyle, 120);
-            setTimeout(applyEditorStyle, 350);
-          }
-        })();
-        </script>
-        """, height=0)
-
         body=quill_to_plain(editor_html)
 
         st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
