@@ -91,13 +91,13 @@ def mark_bible_selection_changed():
 def plain_to_quill_html(body):
     """기존 일반 텍스트를 실시간 절 번호 편집기의 번호 목록으로 변환."""
     if not body or not body.strip():
-        return "<ol><li><br></li></ol>"
+        return '<ol><li><span class="ql-size-large"><br></span></li></ol>'
     lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
     items=[]
     for ln in lines:
         ln=re.sub(r"^\s*\d+\s*(?:절|[.)])?\s*", "", ln)
         safe=ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
-        items.append(f"<li>{safe}</li>")
+        items.append(f'<li><span class="ql-size-large">{safe}</span></li>')
     return "<ol>"+"".join(items)+"</ol>"
 
 def quill_to_plain(html):
@@ -419,81 +419,85 @@ if menu == "✍️ 말씀 기록":
             unsafe_allow_html=True
         )
 
-    st.markdown('<div class="section-title">2. 성경 본문을 타이핑하세요</div>',unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="verse-heading"><div class="book">📖 {book} {chapter}장</div>'
-        '<div class="guide">말씀을 한 절씩 천천히 기록해 보세요.</div></div>',
-        unsafe_allow_html=True
-    )
-    editing_matches = bool(
-        editing
-        and editing.get("writer") == db_writer
-        and editing.get("book") == book
-        and int(editing.get("chapter", 0)) == int(chapter)
-    )
-    initial_body=editing.get("body","") if editing_matches else ""
-    editor_context=f"{display_writer}_{book}_{chapter}_{st.session_state.get('editor_nonce',0)}"
-    editor_html=st_quill(
-        value=plain_to_quill_html(initial_body),
-        html=True,
-        toolbar=[],
-        placeholder="1절 말씀을 입력하세요.",
-        key=f"verse_editor_{editor_context}"
-    )
-    body=quill_to_plain(editor_html)
+    @st.fragment
+    def render_writing_editor():
+        st.markdown('<div class="section-title">2. 성경 본문을 타이핑하세요</div>',unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="verse-heading"><div class="book">📖 {book} {chapter}장</div>'
+            '<div class="guide">말씀을 한 절씩 천천히 기록해 보세요.</div></div>',
+            unsafe_allow_html=True
+        )
+        editing_matches = bool(
+            editing
+            and editing.get("writer") == db_writer
+            and editing.get("book") == book
+            and int(editing.get("chapter", 0)) == int(chapter)
+        )
+        initial_body=editing.get("body","") if editing_matches else ""
+        editor_context=f"{display_writer}_{book}_{chapter}_{st.session_state.get('editor_nonce',0)}"
+        editor_html=st_quill(
+            value=plain_to_quill_html(initial_body),
+            html=True,
+            toolbar=False,
+            placeholder="1절 말씀을 입력하세요.",
+            key=f"verse_editor_{editor_context}"
+        )
+        body=quill_to_plain(editor_html)
 
-    st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
+        st.caption("Enter를 누르는 즉시 다음 절 번호가 1 → 2 → 3…으로 나타납니다. 자동 줄바꿈은 같은 절로 유지됩니다.")
 
-    st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
-    reflection=""
-    if editing_matches:
-        reflection=(editing.get("note") or "").strip()
-        fav=(editing.get("favorite") or "").strip()
-        if not reflection and fav: reflection=fav
-        elif fav and fav not in reflection: reflection=f"{fav}\n{reflection}".strip()
-    reflection=st.text_area(
-        "마음에 남은 구절이나 생각",
-        value=reflection,
-        height=125,
-        placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
-        key=f"reflection_{editor_context}"
-    )
+        st.markdown('<div class="section-title">3. 오늘의 말씀 기록</div>',unsafe_allow_html=True)
+        reflection=""
+        if editing_matches:
+            reflection=(editing.get("note") or "").strip()
+            fav=(editing.get("favorite") or "").strip()
+            if not reflection and fav: reflection=fav
+            elif fav and fav not in reflection: reflection=f"{fav}\n{reflection}".strip()
+        reflection=st.text_area(
+            "마음에 남은 구절이나 생각",
+            value=reflection,
+            height=125,
+            placeholder="타이핑하며 마음에 남은 구절이나 생각을 자유롭게 남겨보세요.",
+            key=f"reflection_{editor_context}"
+        )
 
-    st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
-    save_col,done_col=st.columns(2)
+        st.markdown('<div class="section-title">4. 저장하기</div>',unsafe_allow_html=True)
+        save_col,done_col=st.columns(2)
 
-    if save_col.button("💾 임시 저장",use_container_width=True):
-        payload={
-            "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
-            "chapter":chapter,"body":body,"favorite":"",
-            "note":reflection,"completed":False
-        }
-        try:
-            save_record(editing if editing_matches else None,payload)
-            st.success(f"💾 {display_writer} · {book} {chapter}장 내용을 임시 저장했습니다.")
-            st.session_state.pop("edit_record_id", None)
-            refresh()
-        except Exception as e:
-            st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
-            st.code(str(e))
-
-    if done_col.button("✓ 이 장 완료",use_container_width=True,type="primary"):
-        if not body.strip():
-            st.warning("완료하기 전에 말씀 본문을 입력해 주세요.")
-        else:
+        if save_col.button("💾 임시 저장",use_container_width=True):
             payload={
                 "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
                 "chapter":chapter,"body":body,"favorite":"",
-                "note":reflection,"completed":True
+                "note":reflection,"completed":False
             }
             try:
                 save_record(editing if editing_matches else None,payload)
-                st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
+                st.success(f"💾 {display_writer} · {book} {chapter}장 내용을 임시 저장했습니다.")
                 st.session_state.pop("edit_record_id", None)
                 refresh()
             except Exception as e:
                 st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
                 st.code(str(e))
+
+        if done_col.button("✓ 이 장 완료",use_container_width=True,type="primary"):
+            if not body.strip():
+                st.warning("완료하기 전에 말씀 본문을 입력해 주세요.")
+            else:
+                payload={
+                    "writer":db_writer,"record_date":record_date.isoformat(),"book":book,
+                    "chapter":chapter,"body":body,"favorite":"",
+                    "note":reflection,"completed":True
+                }
+                try:
+                    save_record(editing if editing_matches else None,payload)
+                    st.success(f"✓ {display_writer} · {book} {chapter}장을 완료했습니다.")
+                    st.session_state.pop("edit_record_id", None)
+                    refresh()
+                except Exception as e:
+                    st.error("저장에 실패했습니다. 아래 오류 내용을 확인해 주세요.")
+                    st.code(str(e))
+
+    render_writing_editor()
 
 elif menu == "📊 나의 진행":
     st.markdown('<div class="section-title">나의 진행 현황</div>',unsafe_allow_html=True)
