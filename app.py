@@ -1,3 +1,4 @@
+import html
 from pathlib import Path
 import streamlit as st
 from datetime import date
@@ -201,50 +202,44 @@ def mark_bible_selection_changed():
     # 앱 최초 실행이 아니라 사용자가 성경/장을 직접 변경한 경우만 기록 존재 여부 확인
     st.session_state["bible_selection_changed"] = True
 
+def _clean_verse_prefix(line):
+    """Remove old saved verse numbers without touching normal words."""
+    line = line.strip()
+    for _ in range(4):
+        updated = re.sub(r"^\s*\d+\s*(?:절|[.)])?\s+", "", line).strip()
+        if updated == line:
+            break
+        line = updated
+    return line
+
+
 def plain_to_quill_html(body):
-    """DB의 일반 텍스트를 절 번호 목록으로 변환.
-    과거 버전에서 저장된 '1  1 본문', '1. 1 본문' 같은 중복 번호도 정리.
-    """
+    """Load current and legacy records as one HTML list item per verse."""
     if not body or not body.strip():
         return "<ol><li><br></li></ol>"
-    lines=[ln.strip() for ln in body.splitlines() if ln.strip()]
-    items=[]
-    for ln in lines:
-        # 줄 앞에 붙은 절 번호를 반복 제거
-        # 예: '1  본문', '1. 본문', '1절 본문', '1 1 본문', '1. 1 본문'
-        previous=None
-        while previous != ln:
-            previous=ln
-            ln=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s+", "", ln).strip()
-        safe=(ln.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;"))
-        items.append(f"<li>{safe}</li>")
-    return "<ol>"+"".join(items)+"</ol>"
+    # Previous version accidentally saved literal backslash-n characters.
+    body = body.replace("\\n", "\n").replace("\r\n", "\n")
+    lines = [_clean_verse_prefix(line) for line in body.splitlines() if line.strip()]
+    return "<ol>" + "".join(f"<li>{html.escape(line)}</li>" for line in lines) + "</ol>"
 
-def quill_to_plain(html):
-    """절 목록 HTML을 DB 저장용 일반 텍스트로 변환.
-    절 번호는 <ol>이 화면에서만 표시하므로 DB에는 저장하지 않음.
-    """
-    if not html:
+
+def quill_to_plain(markup):
+    """Store actual newline characters, not literal backslash-n or list numbers."""
+    if not markup:
         return ""
-    items=re.findall(r"<li[^>]*>(.*?)</li>", html, flags=re.S|re.I)
-    if items:
-        out=[]
-        for item in items:
-            item=re.sub(r"<br\\s*/?>", "\\n", item, flags=re.I)
-            item=re.sub(r"<[^>]+>", "", item)
-            item=(item.replace("&nbsp;"," ").replace("&amp;","&")
-                      .replace("&lt;","<").replace("&gt;",">")).strip()
-            # 혹시 편집기에 직접 들어온 앞쪽 절 번호도 제거
-            previous=None
-            while previous != item:
-                previous=item
-                item=re.sub(r"^\\s*\\d+\\s*(?:절|[.)])?\\s+", "", item).strip()
-            if item:
-                out.append(item)
-        return "\\n".join(out)
-    text=re.sub(r"<br\\s*/?>", "\\n", html, flags=re.I)
-    text=re.sub(r"<[^>]+>", "", text)
-    return text.strip()
+    items = re.findall(r"<li[^>]*>(.*?)</li>", markup, flags=re.S | re.I)
+    if not items:
+        items = [markup]
+    lines = []
+    for item in items:
+        item = re.sub(r"<br\s*/?>", "\n", item, flags=re.I)
+        item = re.sub(r"<[^>]+>", "", item)
+        item = html.unescape(item).replace("\\n", "\n")
+        for line in item.splitlines():
+            line = _clean_verse_prefix(line)
+            if line:
+                lines.append(line)
+    return "\n".join(lines)
 
 # ---------- Design ----------
 st.markdown("""
